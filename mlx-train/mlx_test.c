@@ -455,55 +455,284 @@
 		return(0);
 	}
 
-	*FALTA LA PARTE DE PINTAR PIXELES DE FORMA NO OPTIMIZADA Y DE FORMA OPTIMIZADA*
-	mlx_pixel_put.c //puede ser interesante meterle mlx_rgb.c
-	mlx_new_image.c
-	mlx_destroy_image.c
-	mlx_put_image_to_window.c
-	mlx_get_data_addr.c
+	-----------------------------
+
+	Lo siguiente que veremos es como pintar los pixeles de la pantalla.
+	Para ello usamos la funcion mlx_pixel_put (mlx_pixel_put.c):
+		
+		int		mlx_pixel_put(t_xvar *xvar,t_win_list *win,
+			      int x,int y,int color)
+	
+		- Argumentos:
+			conexion, ventana, cordenada x, cordenada y, color a pintar
+	
+	El ejemplo que se comparte a continuacion es mas complejo de lo que podria ser porque
+	se crean estructuras de mas, pero esta explicado en los comentarios:
+
+
+	#include "minilibx-linux/mlx.h"
+	#include <stdio.h>
+	#include <unistd.h>
+	#include <X11/keysym.h>
+	#include <string.h>
+	#define SIDE_LEN	800
+
+	//Estructura para acceder a los colores
+	struct s_col_name
+	{
+		char	*name;
+		int		color;
+	};
+
+	//Estructura con los colores
+	struct s_col_name mlx_col_name[] = {
+		{"red", 0xFF0000},
+		{"green", 0x00FF00},
+		{"blue", 0x0000FF},
+		{"white", 0xFFFFFF},
+		{"black", 0x000000},
+		{NULL, 0}
+	};
+
+	//Estructura para la conexion y la ventana
+	typedef struct s_var
+	{
+		void	*mlx;
+		void	*win;
+	}			t_var;
+
+	//Funcion para obtener el color de la estructura
+	int	get_color_by_name(const char *name)
+	{
+		int	i = 0;
+	
+		while (mlx_col_name[i].name != NULL)
+		{
+			if (strcmp(mlx_col_name[i].name, name) == 0)
+				return (mlx_col_name[i].color);
+			i++;
+		}
+		return (-1);
+	}
+
+	//Funcion para colorear la pantalla
+	void	color_screen(t_var *data, int color)
+	{
+		for (int y = 0; y < SIDE_LEN; ++y)
+		{
+			for (int x = 0; x < SIDE_LEN; ++x)
+			{
+				mlx_pixel_put(data->mlx, data->win, x, y, color);
+			}
+		}
+	}
+	
+	//Ni las estructuras de colores ni la funcion para obtener el color serian necesarias si en la funcion
+	//f llamamos al color por su valor int hexadecimal
+	//Funcion para gestionar el evento
+	int	f(int keysym, t_var *data)
+	{
+		if (keysym == XK_r)
+			color_screen(data, get_color_by_name("red"));
+		else if (keysym == XK_g)
+			color_screen(data, get_color_by_name("green"));
+		else if (keysym == XK_b)
+			color_screen(data, get_color_by_name("blue"));
+		else if (keysym == XK_w)
+			color_screen(data, get_color_by_name("white"));
+		else if (keysym == XK_space)
+			color_screen(data, get_color_by_name("black"));
+	
+		return (0);
+	}
+	
+	int	main(void)
+	{
+		t_var	data;
+	
+		data.mlx = mlx_init();//Conexion
+		data.win = mlx_new_window(data.mlx, SIDE_LEN, SIDE_LEN, "Ventana texto de color");//Ventana
+	
+		mlx_key_hook(data.win, f, &data);//Hook de gestion de teclado
+		mlx_loop(data.mlx);//Loop para eventos
+		return(0);
+	}
+
+	-----------------------
+
+	Para optimizar el pintado de la ventana introducimos el concepto de IMAGEN:
+		https://harm-smits.github.io/42docs/libs/minilibx/images.html
+
+	-IMAGEN:
+	
+	El concepto de imagen se refiere a un bloque de memoria que representa una imagen en formato 
+	crudo (raw), donde cada píxel se almacena en función de su color. 
+	Cuando trabajamos con imágenes, no manipulamos directamente los píxeles con funciones como 
+	mlx_pixel_put, sino que podemos acceder a la memoria de la imagen directamente utilizando punteros 
+	a los datos de la imagen. Esto nos permite modificar muchos píxeles de manera eficiente sin 
+	necesidad de realizar múltiples llamadas a la API gráfica.
+
+	Para acceder a los píxeles de una imagen, utilizamos la función mlx_get_data_addr, que nos da 
+	un puntero al bloque de memoria donde están almacenados los píxeles de la imagen en formato crudo. 
+	Luego, podemos modificar los valores de estos píxeles directamente.
+
+	- Funciones involucradas en el uso de imágenes con MiniLibX:
+
+		-mlx_new_image: 
+			
+			void *mlx_new_image(void *mlx_ptr, int width, int height);
+			
+			Crea una nueva imagen en memoria que puedes modificar antes de mostrarla en la ventana.
+		
+		-mlx_get_data_addr:
+		
+			char *mlx_get_data_addr(void *img_ptr, int *bits_per_pixel, int *size_line, int *endian);
+
+			Te proporciona un puntero al bloque de memoria donde están los píxeles de la imagen.
+
+			-Argumentos:
+				-img_ptr: Un puntero a la imagen que se creó con mlx_new_image.
+				-bits_per_pixel: Número de bits usados para representar el color de un solo píxel.
+				-size_line: Número de bytes utilizados para una fila completa de píxeles.
+				-endian: Especifica el orden de los bytes en el valor del color 
+				(si es little-endian o big-endian).
+				-Retorno: Devuelve un puntero a la dirección de memoria donde comienza la imagen.
+
+		-mlx_put_image_to_window:
+
+			int mlx_put_image_to_window(void *mlx_ptr, void *win_ptr, void *img_ptr, int x, int y);
+			
+			Coloca la imagen en una ventana.
+			Dibuja la imagen en las coordenadas especificadas dentro de la ventana.
+
+		-mlx_destroy_image:
+
+			int mlx_destroy_image(void *mlx_ptr, void *img_ptr);
+
+			Libera la memoria de la imagen una vez que ya no es necesaria.
+
+	
+	Veamos un ejemplo de uso:
+
 */
 
 #include "minilibx-linux/mlx.h"
 #include <stdio.h>
 #include <unistd.h>
+#include <X11/keysym.h>
+#include <string.h>
+#define SIDE_LEN	800
 
-typedef struct s_data
+//Estructura para la conexion, la ventana y la imagen
+typedef struct s_var
 {
-	void	*mlx_ptr;
-	void	*win_ptr;
-	int		color;
-}			t_data;
+	void	*mlx;
+	void	*win;
+	void	*img;//Puntero a la imagen
+	char	*addr;//Puntero a la direccion de los pixeles de la imagen
+	int		bpp;//Bits por pixel
+	int		line_length;//Tamano de la fila de la imagen
+	int		endian;//Endian de la imagen
+}			t_var;
 
-int	sleep_event(int keysym, t_data *data)//Funcion para alargar el evento 2 segundos
+//Funcion para obtener el color de la estructura
+int	get_color_by_name(const char *name)
 {
-	printf("Pressed %d\n", keysym);
-	sleep(2);
-	return (1);
+	if (strcmp(name, "red") == 0)
+		return (0xFF0000);
+	if (strcmp(name, "green") == 0)
+		return (0x00FF00);
+	if (strcmp(name, "blue") == 0)
+		return (0x0000FF);
+	if (strcmp(name, "white") == 0)
+		return (0xFFFFFF);
+	if (strcmp(name, "black") == 0)
+		return (0x000000);
+	return (-1);
 }
 
-int	change_color(t_data *data)//Funcion que se aplicara siempre que no se disparen eventos
+//Funcion ara poner color en la direccion de la imagen
+void	my_mlx_pixel_put(t_var *data, int x, int y, int color)
 {
-	mlx_string_put(data->mlx_ptr, data->win_ptr, 150, 250, data->color, "Hello World!");
+	char	*dst;
 
-	if (data->color == 0xFF0000)//Si es rojo
-		data->color = 0x00FF00;//cambia a verde 
-	else if (data->color == 0x00FF00)//Si es verde
-		data->color = 0x0000FF;//cambia a azul
-	else
-		data->color = 0xFF0000;//Sino cambia a rojo
+	dst = data->addr + (y * data->line_length + x * (data->bpp/8));
+	*(unsigned int *)dst = color;
+}
+/*
+   Esta funcion es la novedad en este caso y la que merece ser explicada mejor:
+   Sirve para calcular la direccion en memoria de la imagen donde queremos escribir el pixel.
+   	1 data->addr:
+		addr es un puntero que apunta a la PRIMERA DIRECCION DE MEMORIA de la imagen (donde
+		se almacenan los pixeles).
+	2 y * data->line_length:
+		Esto calcula la posicion (coordenada) vertical (y) en la imagen.
+		Como cada fila tiene un numero determinado de bytes (representado por line_length),
+		multiplicamos y por line_length para saltar a la fila adecuada.
+	3 x * (data->bpp /8):
+		Esto calcula la posicion (coordenada) horizontal (x) dentro de la file. El valor bpp
+		(bits por pixel) nos indica cuantos bits se usan para cada pixel.
+		Dividimos por 8 para obtener cuantos bytes ocupa cada pixel, ya que 1 byte = 8 bits.
+		Luego multiplicamos por x para movernos al pixel correcto dentro de la fila.
+	4 dst = data->addr + (y * data->line_length + x * (data->bpp/8));:
+		Esta linia combina las dos operaciones anteriores y calcula la DIRECCION EXACTA EN MEMORIA 
+		donde se encuentra el pixel en la posicion (x, y).
+	5 *(unsigned int *)dst = color:
+		Aqui convertimos dst en un puntero a un valor de tipo unsigned int y le asignamos el color.
+		Es decir, almacenamos el valor de color en la memoria correspondiente a ese pixel.
+
+	Porque declaramos dst como puntero a array de caracteres y luego lo casteamos a unsigned int?
+	Usamos char* porque necesitamos movernos byte a byte (1 char es 1 byte), por la memoria para
+	calcular la direccion correcta del pixel, independientemente del numero de bytes que ocupe
+	cada pixel.
+	Luego, casteamos a unsigned int* solo en el momento de escribir el color, porque estamos seguros
+	de que queremos tratar ese bloque especifico de memoria como un valor completo (4 bytes en este caso)
+*/
+
+//Funcion para colorear la pantalla
+void	color_screen(t_var *data, int color)
+{
+	for (int y = 0; y < SIDE_LEN; ++y)//loopeamos por filas
+	{
+		for (int x = 0; x < SIDE_LEN; ++x)//loopeamos por columnas
+		{
+			my_mlx_pixel_put(data, x, y, color);//En cada coordenada (x, y) pintamos de color
+		}
+	}
+	//Despues de modificar la imagen en memoria, la mostramos en la ventana
+	mlx_put_image_to_window(data->mlx, data->win, data->img, 0, 0);
+}
+
+//Funcion para gestionar el evento
+int	f(int keysym, t_var *data)
+{
+	if (keysym == XK_r)
+		color_screen(data, get_color_by_name("red"));
+	else if (keysym == XK_g)
+		color_screen(data, get_color_by_name("green"));
+	else if (keysym == XK_b)
+		color_screen(data, get_color_by_name("blue"));
+	else if (keysym == XK_w)
+		color_screen(data, get_color_by_name("white"));
+	else if (keysym == XK_space)
+		color_screen(data, get_color_by_name("black"));
+
 	return (0);
 }
 
 int	main(void)
 {
-	t_data	data;
+	t_var	data;
 
-	data.mlx_ptr = mlx_init();
-	data.win_ptr = mlx_new_window(data.mlx_ptr, 500, 500, "Ventana texto de color");
-	data.color = 0xFF0000;
+	data.mlx = mlx_init();//Conexion
+	data.win = mlx_new_window(data.mlx, SIDE_LEN, SIDE_LEN, "Ventana texto de color");//Ventana
+	data.img = mlx_new_image(data.mlx, SIDE_LEN, SIDE_LEN);//Crea la imagen
 
-	mlx_key_hook(data.win_ptr, sleep_event, &data);//Hook de gestion de teclado
-	mlx_loop_hook(data.mlx_ptr, change_color, &data);//Hook de gestion de bucle
-	mlx_loop(data.mlx_ptr);
+	//Obtiene la direccion de la imagen. 
+	data.addr = mlx_get_data_addr(data.img, &data.bpp, &data.line_length, &data.endian);
+
+	mlx_key_hook(data.win, f, &data);//Hook de gestion de teclado
+	mlx_loop(data.mlx);//Loop para eventos
+	mlx_destroy_image(data.mlx, data.img);//Liberamos la memoria de la imagen
 	return(0);
 }
